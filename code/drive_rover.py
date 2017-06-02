@@ -55,7 +55,7 @@ class RoverState():
         self.rock_dists = None
         self.ground_truth = ground_truth_3d # Ground truth worldmap
         self.mode = 'forward' # Current mode (can be forward or stop)
-        self.throttle_set = 0.3 # Throttle setting when accelerating
+        self.throttle_set = 0.5 # Throttle setting when accelerating
         self.brake_set = 10 # Brake setting when braking
         # The stop_forward and go_forward fields below represent total count
         # of navigable terrain pixels.  This is a very crude form of knowing
@@ -63,7 +63,12 @@ class RoverState():
         # get creative in adding new fields or modifying these!
         self.stop_forward = 50 # Threshold to initiate stopping
         self.go_forward = 500 # Threshold to go forward again
-        self.max_vel = 2.2 # Maximum velocity (meters/second)
+        self.max_vel = 3.0 # Maximum velocity (meters/second)
+        self.first_time = 1
+        self.rock_count = 0.
+        self.total_rocks = 6
+        self.initial_y = 0
+        self.initial_x = 0
         # Image output from perception step
         # Update this image to display your intermediate analysis steps
         # on screen in autonomous mode
@@ -72,7 +77,10 @@ class RoverState():
         # Update this image with the positions of navigable terrain
         # obstacles and rock samples
         self.worldmap = np.zeros((200, 200, 3), dtype=np.float) 
+        self.visitedmap = np.zeros((200,200),dtype=np.float)
+        self.heatmap = np.ones((200,200),dtype=np.float) * 10.
         self.samples_pos = None # To store the actual sample positions
+        self.samples_to_find = 6
         self.samples_found = 0 # To count the number of samples found
         self.near_sample = 0 # Will be set to telemetry value data["near_sample"]
         self.picking_up = 0 # Will be set to telemetry value data["picking_up"]
@@ -121,7 +129,7 @@ def telemetry(sid, data):
             send_control(commands, out_image_string1, out_image_string2)
  
             # If in a state where want to pickup a rock send pickup command
-            if Rover.send_pickup:
+            if Rover.send_pickup and not Rover.picking_up:
                 send_pickup()
                 # Reset Rover flags
                 Rover.send_pickup = False
@@ -166,7 +174,7 @@ def send_control(commands, image_string1, image_string2):
         "data",
         data,
         skip_sid=True)
-
+    eventlet.sleep(0)
 # Define a function to send the "pickup" command 
 def send_pickup():
     print("Picking up")
@@ -175,7 +183,7 @@ def send_pickup():
         "pickup",
         pickup,
         skip_sid=True)
-
+    eventlet.sleep(0)
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Remote Driving')
     parser.add_argument(
@@ -187,7 +195,7 @@ if __name__ == '__main__':
     )
     args = parser.parse_args()
     
-    os.system('rm -rf IMG_stream/*')
+    #os.system('rm -rf IMG_stream/*')
     if args.image_folder != '':
         print("Creating image folder at {}".format(args.image_folder))
         if not os.path.exists(args.image_folder):

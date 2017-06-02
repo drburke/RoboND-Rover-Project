@@ -1,48 +1,91 @@
+## Project: Search and Sample Return
 [//]: # (Image References)
-[image_0]: ./misc/rover_image.jpg
-# Search and Sample Return Project
-![alt text][image_0] 
 
-This project is modeled after the [NASA sample return challenge](https://www.nasa.gov/directorates/spacetech/centennial_challenges/sample_return_robot/index.html) and it will give you first hand experience with the three essential elements of robotics, which are perception, decision making and actuation.  You will carry out this project in a simulator environment built with the Unity game engine.  
+[image1]: ./threshed.jpg
+[image2]: ./heatmap.jpg
 
-## The Simulator
-The first step is to download the simulator build that's appropriate for your operating system.  Here are the links for [Linux](https://s3-us-west-1.amazonaws.com/udacity-robotics/Rover+Unity+Sims/Linux_Roversim.zip), [Mac](	https://s3-us-west-1.amazonaws.com/udacity-robotics/Rover+Unity+Sims/Mac_Roversim.zip), or [Windows](https://s3-us-west-1.amazonaws.com/udacity-robotics/Rover+Unity+Sims/Windows_Roversim.zip).  
+### Writeup / README
 
-You can test out the simulator by opening it up and choosing "Training Mode".  Use the mouse or keyboard to navigate around the environment and see how it looks.
+#### Rover Simulation Settings :
+- Screen Resolution : 1024 x 768
+- Graphics Quality : Good
+- FPS : ~20
 
-## Dependencies
-You'll need Python 3 and Jupyter Notebooks installed to do this project.  The best way to get setup with these if you are not already is to use Anaconda following along with the [RoboND-Python-Starterkit](https://github.com/ryan-keenan/RoboND-Python-Starterkit). 
+** on updating all files runs up to 50fps.  Seems (initially) more stable, I've increased the max speed a bit.
+
+### Notebook Analysis
+
+The main goal is to identify navigable terrain, obstacles and rocks.  Navigable terrain I found was doing a pretty good job with RGB values above 160.  Obstacles are
+
+For the rocks I found that RG values above 110 and G values above 50 worked very well.  
+
+Rocks in this simulation are mostly yellow and not terribly dark.  A simple RGB limit is R+G > 110, B < 50, the key trade being lots of reds and greens, not much blue.
+
+In the transformed images there's a lot of black that can be recognized as obstacles despite being outside of the field of view.  I've removed black from the obstacles.  Also for nice imaging removed rocks from obstacles and navigable terrain.
+
+Here is a nice image of this detection.
+
+![threshold rock image][image1]
+
+#### Mapping and Perception
+
+First we want to warp the image from the rovers point of view to be top view / cartesian x-y space.  For this we must map matching squares to define an image transform.  Set 1 meter to be 10x10 pixels at the worldmap.  Define points of a warped square in robo image to square in world map, use cv2 to transform perspective.
+
+Next, find the navigable, obstacle and rocks using the warped / top down images.  This uses the threshold function described above.  I also threshold the POV images as they are sometimes interesting to look at.
+
+Convert warped images into x and y pixels with respect to rover location and direction.  'Rover-centric' coordinates.  I do this for all three sets of coordinates : navigable, obstacle, rock.
+
+From these I split each group into pixels close enough to be considered 'visited' and those that are close enough to be in my field of view and are most likely accurate.
+
+Transform these rover centric pixels to world map coordinates using the known global rover location, and yaw/angle.
+
+I have created a map of pixels that are simply 'visited' in that the rover has seen them up close in its FOV.  Set the visited map to 1's for the navigable terrain.
+
+I could do something fancy here too with rocks that have been seen but not yet picked up, would help with missing rocks when they are only briefly seen.
+
+Update world map by '1' for each of the three types.  Store world map in a 3 channel array, could be later drawn using three RGB channels.  Only record these values if the rover pitch and yaw are close to zero.
+
+Points in FOV are also converted to distances and angles, this is including the heat map values that would be in the FOV.
+
+Last I've tried to do something a bit more fancy but also simple.  It seems to work decently.  Key is to create a full map where the pixel values are how desirable it would be to go visit that pixel.  All pixels start off as valuable. Visited pixels become less valuable, but still > 0.  The heat map is then blurred a few different blur levels, ideally to encourage avoiding close obstacles and moving to new areas that are close and far away.
+
+This world map and heat map, partially filled, can be seen in the video and image below.  Heat map being greyscale and world map RGB.
 
 
-Here is a great link for learning more about [Anaconda and Jupyter Notebooks](https://classroom.udacity.com/courses/ud1111)
+![partially filled world map][image2]
 
-## Recording Data
-I've saved some test data for you in the folder called `test_dataset`.  In that folder you'll find a csv file with the output data for steering, throttle position etc. and the pathnames to the images recorded in each run.  I've also saved a few images in the folder called `calibration_images` to do some of the initial calibration steps with.  
+### Autonomous Navigation
 
-The first step of this project is to record data on your own.  To do this, you should first create a new folder to store the image data in.  Then launch the simulator and choose "Training Mode" then hit "r".  Navigate to the directory you want to store data in, select it, and then drive around collecting data.  Hit "r" again to stop data collection.
+This was an interesting function to write.  I can imagine a few different ways to tackle this problem.  Here is one of them :
 
-## Data Analysis
-Included in the IPython notebook called `Rover_Project_Test_Notebook.ipynb` are the functions from the lesson for performing the various steps of this project.  The notebook should function as is without need for modification at this point.  To see what's in the notebook and execute the code there, start the jupyter notebook server at the command line like this:
+I'll try to explain the approach instead of simply walking through the if statements.  
 
-```sh
-jupyter notebook
-```
+#### Stop
+If we're 'stopped' but still rolling, kill throttle and set the breaks.  Stay stopped.
 
-This command will bring up a browser window in the current directory where you can navigate to wherever `Rover_Project_Test_Notebook.ipynb` is and select it.  Run the cells in the notebook from top to bottom to see the various data analysis steps.  
+If stopped and there isn't much navigable terrain in front of us, or there are too many close objects: rotate.  Otherwise we're done stopping, continue on.
 
-The last two cells in the notebook are for running the analysis on a folder of test images to create a map of the simulator environment and write the output to a video.  These cells should run as-is and save a video called `test_mapping.mp4` to the `output` folder.  This should give you an idea of how to go about modifying the `process_image()` function to perform mapping on your data.  
+#### Forward
+If there are too many close objects in front of us, stop and rotate.  If throttle is up but we're not moving then increment a counter.  If this gets too high we're probably 'stuck'.  Also stop if there isn't any navigable terrain ahead.  This is similar to the obstacles above.
 
-## Navigating Autonomously
-The file called `drive_rover.py` is what you will use to navigate the environment in autonomous mode.  This script calls functions from within `perception.py` and `decision.py`.  The functions defined in the IPython notebook are all included in`perception.py` and it's your job to fill in the function called `perception_step()` with the appropriate processing steps and update the rover map. `decision.py` includes another function called `decision_step()`, which includes an example of a conditional statement you could use to navigate autonomously.  Here you should implement other conditionals to make driving decisions based on the rover's state and the results of the `perception_step()` analysis.
+Moving forward, find a new angle based on the navigable terrain that is in the FOV and close enough.  Weight this angle by the heat map calculated previously.  I also steer just to the right of this ideal angle to keep the rover near walls and run a specific direction around the terrain.
 
-`drive_rover.py` should work as is if you have all the required Python packages installed. Call it at the command line like this: 
+Damp the steering angle by alpha, experimentally derived.  This adds a 'P' term.  Could later add an 'ID'.  This is to prevent the rover from oscillating.  When the framerate started skipping or updating less frequently the rover returns to oscillating.  
 
-```sh
-python drive_rover.py
-```  
+If angle is high and we're moving too fast, slow down.
 
-Then launch the simulator and choose "Autonomous Mode".  The rover should drive itself now!  It doesn't drive that well yet, but it's your job to make it better!  
+#### Stuck
+If we're stuck, first rotate left (for consistency in mapping), then back up in the direction that maximizes viewable navigable terrain.
 
-**Note: running the simulator with different choices of resolution and graphics quality may produce different results!  Make a note of your simulator settings in your writeup when you submit the project.**
+#### Rocks
+If at any point the rover sees a rock, immediately slow down if moving too fast and drive towards the rock slowly.  Once there pick it up and increment a rock counter.  I found the rocks weren't always counted by the other rock counter.  Sometimes the rover attempts to drive over rough or obstacle terrain to get to a rock, then gets stuck, then runs away.  This could be improved with better or actual path mapping and planning.  Or creating a rock + object based heat map.
 
+Once done picking up the rock, back up- this should put us back in the same direction that we were going.  Ideally the heat map would do the same.
 
+Once all rocks have been picked up, to return, set the starting points as having high value on the heat map, once there stop.
+
+### Thoughts
+
+All in all the rover does pretty well.  With a bit of time it can map the entire world and find all of the rocks- with few exceptions.  I seem to have stability problems with framerate and such when the rover gets too fast.  This prevented me from speeding it up too much.  
+
+I have mentioned above a few improvements that could be made.  The best would probably be to add full path mapping and planning.  
